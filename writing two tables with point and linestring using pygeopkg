@@ -1,0 +1,83 @@
+from pygeopkg.core.geopkg import GeoPackage
+from pygeopkg.core.srs import SRS
+from pygeopkg.core.field import Field
+from pygeopkg.shared.enumeration import GeometryType, SQLFieldTypes
+import xarray as xr
+import numpy as np
+from geopandas.tools import sjoin
+
+#create a geopackage
+gpkg=GeoPackage.create(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\linking_layers.gpkg', flavor = 'EPSG')
+
+#Fill in well known text from dataset
+data=xr.load_dataarray(r'C:\Users\Sysadmin\Desktop\QGIS\wreck_trajectories.nc')
+srs_wkt = data.attrs['wkt']
+
+srs = SRS('Custom', 'EPSG', 4326, srs_wkt)
+
+#fields and feature class of the first trajectory_table aka child_table
+fields = (Field('serial_no', SQLFieldTypes.integer),
+          Field('start_time', SQLFieldTypes.datetime))
+fc = gpkg.create_feature_class ('child_table', srs, fields = fields, shape_type = GeometryType.linestring)
+
+#fields and feature class of the second mission_table aka parent_table
+fields2 = (Field('mission_name', SQLFieldTypes.text),
+          Field('date', SQLFieldTypes.date),
+          Field('vehicle_name', SQLFieldTypes.text),
+          Field('serial_no', SQLFieldTypes.integer),
+          Field('opening_angle', SQLFieldTypes.integer),
+          Field('frequency', SQLFieldTypes.integer),
+          Field('image_resolution', SQLFieldTypes.text))
+fc2 = gpkg.create_feature_class('parent_table', srs, fields = fields2, shape_type = GeometryType.point)
+from pygeopkg.shared.constants import SHAPE
+from pygeopkg.conversion.to_geopkg_geom import (points_zm_to_gpkg_line_string_zm,point_to_gpkg_point, make_gpkg_geom_header)
+from pygeopkg.core.geopkg import GeoPackage
+
+gpkg = GeoPackage(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\linking_layers.gpkg')
+fc = gpkg.get_feature_class ('child_table')
+fc2 = gpkg.get_feature_class ('parent_table')
+
+field_names = [SHAPE, 'serial_no','start_time']
+field_names2 = [SHAPE, 'mission_name','date','vehicle_name','serial_no','opening_angle','frequency','image_resolution']
+
+hdr =  make_gpkg_geom_header(fc.srs.srs_id)
+
+#input values into the child_table
+rows=[]
+for i in range(len(data['leg'])):
+    line = data[i].transpose('index', 'xyz')
+    shape = list(line.shape)
+    shape[-1] = 4
+    arr = np.zeros(shape)
+    arr[:, 0] = line[:, 1]
+    arr[:, 1] = line[:, 0]
+    arr[:, 2] = line[:, 2]
+
+    gpkg_wkb = points_zm_to_gpkg_line_string_zm(hdr, arr)
+
+    rows.append([gpkg_wkb,i,'2023-11-14 14:28:00'])
+
+fc.insert_rows(field_names, rows)
+
+#input values into the parent_table
+rows2=[]
+points = [(-119, 34),(-120,35)]
+for x,y in points:
+    gpkg_wkb2 = point_to_gpkg_point(hdr,x,y)
+
+    rows2.append([gpkg_wkb2,'Mission Zeus','2023-11-14','Vehicle Zeus','1','45','100','480p'])
+
+fc2.insert_rows(field_names2, rows2)
+
+import geopandas
+example = geopandas.read_file(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\linking_layers.gpkg') #Returns a GeoDataFrame object
+example
+
+example1 = geopandas.read_file(
+    r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\linking_layers.gpkg', 
+    layer ='parent_table', 
+    #rows=3, 
+    #include_fields=["serial_no","mission_name"],
+    ignore_geometry=False, 
+)
+example1
