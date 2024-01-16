@@ -112,7 +112,7 @@ with gpkg.connection as conn:
     VALUES(?,?,?,?)""",rows)
 
 
-
+# displaying the linestring values from the child table
 gpkg=GeoPackage(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\all_tables.gpkg')
 cursor = gpkg.connection.execute("""SELECT * FROM table1_line""")
 features=cursor.fetchall()
