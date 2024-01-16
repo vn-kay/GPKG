@@ -1,0 +1,122 @@
+#Creating a geopackage
+from fudgeo.geopkg import GeoPackage
+gpkg: GeoPackage = GeoPackage.create(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\all_tables.gpkg', flavor='EPSG')
+
+#calling the geopackage
+gpkg=GeoPackage(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\all_tables.gpkg')
+
+from fudgeo.enumeration import GeometryType, SQLFieldType
+from fudgeo.geopkg import FeatureClass, Field, SpatialReferenceSystem
+
+import numpy as np
+import xarray as xr
+
+
+
+#Loading the dataset
+data=xr.load_dataarray(r'C:\Users\Sysadmin\Desktop\QGIS\wreck_trajectories.nc')
+srs_wkt = data.attrs['wkt']
+
+srs = SpatialReferenceSystem(name='Custom', organization='EPSG', org_coord_sys_id=4326, definition=srs_wkt)
+
+#fields and feature class of the table1_line holding line data
+fields = (Field('serial_no', SQLFieldType.integer),
+          Field('start_time', SQLFieldType.datetime))
+fc = gpkg.create_feature_class ('table1_line', srs=srs, fields = fields, shape_type = GeometryType.linestring,spatial_index=False)
+
+#fields and feature class of the table2_point holding point data
+fields2 = (Field('mission_name', SQLFieldType.text),
+          Field('date', SQLFieldType.date),
+          Field('vehicle_name', SQLFieldType.text),
+          Field('serial_no', SQLFieldType.integer),
+          Field('opening_angle', SQLFieldType.integer),
+          Field('frequency', SQLFieldType.integer),
+          Field('image_resolution', SQLFieldType.text))
+fc2 = gpkg.create_feature_class('table2_point', srs=srs, fields = fields2, shape_type = GeometryType.point,spatial_index=False)
+
+#fields and feature class of the table3_poly holding polygon data
+fields3 = (Field('serial_no', SQLFieldType.integer),
+           Field('polygon_shape', SQLFieldType.text))
+fc3 = gpkg.create_feature_class('table3_poly', srs=srs, fields=fields3, shape_type = GeometryType.polygon,spatial_index=False)
+
+
+
+from fudgeo.geopkg import GeoPackage
+#Establishing parent child relationship between the two tables using SQL
+#parent - table3_poly
+#child - table1_line
+
+gpkg=GeoPackage(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\all_tables.gpkg')
+
+cursor = gpkg.connection.execute("""PRAGMA foreign_keys=off;""")
+cursor = gpkg.connection.execute("""BEGIN TRANSACTION;""")
+cursor = gpkg.connection.execute("""ALTER TABLE table1_line RENAME TO old_table1_line;""")
+cursor = gpkg.connection.execute("""CREATE TABLE table1_line
+( fid INTEGER PRIMARY KEY AUTOINCREMENT,
+  SHAPE object,
+  parent_ID, INTEGER,
+  serial_no object,
+  start_time object,
+  CONSTRAINT p_to_c
+    FOREIGN KEY (parent_ID)
+    REFERENCES table3_poly(fid)
+);""")
+cursor = gpkg.connection.execute("""COMMIT;""")
+cursor = gpkg.connection.execute("""PRAGMA foreign_keys=on;""")
+
+
+
+from fudgeo.geometry import LineStringM, Point, Polygon
+
+#input values into the table3_poly
+rows3=[]
+poly=[[(0, 0), (1, 0), (1, 1),(0, 1)],[(2, 2), (4, 2), (4, 4), (2, 4)]]
+for i in poly:
+    gpkg_wkb3 = Polygon(coordinates=poly,srs_id=fc.spatial_reference_system.srs_id)
+    
+    rows3.append([gpkg_wkb3,'1','IDK What shape it is'])
+
+with gpkg.connection as conn:
+    cursor = conn.execute("""INSERT INTO table3_poly(SHAPE, serial_no, polygon_shape)
+    VALUES(?,?,?)""", rows3[0])
+    parent_ID = cursor.lastrowid #defining a different primary key so multiple primary keys from the child table can reference this key.
+
+#input values into the table2_point
+rows2=[]
+points = [(2, 2), (4, 2), (4, 4), (2, 4)]
+for x,y in points:
+    gpkg_wkb2 = Point(x=x,y=y,srs_id=fc.spatial_reference_system.srs_id)
+
+    rows2.append([gpkg_wkb2,'Mission Zeus','2023-11-14','Vehicle Zeus','1','45','100','480p'])
+
+with gpkg.connection as conn:
+    conn.executemany("""INSERT INTO table2_point(SHAPE, mission_name, date, vehicle_name, serial_no, opening_angle, frequency, image_resolution)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?)""", rows2)
+
+#input values into the table1_line
+rows=[]
+for i in range(len(data['leg'])):
+    line = data[i].transpose('index', 'xyz')
+    shape = list(line.shape)
+    shape[-1] = 3
+    arr = np.zeros(shape)
+    arr[:, 0] = line[:, 1]
+    arr[:, 1] = line[:, 0]
+
+    gpkg_wkb = LineStringM(arr, srs_id=fc.spatial_reference_system.srs_id)
+
+    rows.append([gpkg_wkb, parent_ID, i,'2023-11-14 14:28:00'])
+
+with gpkg.connection as conn:
+    conn.executemany("""INSERT INTO table1_line(SHAPE, parent_ID, serial_no, start_time) 
+    VALUES(?,?,?,?)""",rows)
+
+
+
+gpkg=GeoPackage(r'C:\Users\Sysadmin\Desktop\QGIS\Python codes\all_tables.gpkg')
+cursor = gpkg.connection.execute("""SELECT * FROM table1_line""")
+features=cursor.fetchall()
+features
+
+
+
