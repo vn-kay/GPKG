@@ -41,11 +41,10 @@ rows=[]
 for i in range(len(data['leg'])):
     line = data[i].transpose('index', 'xyz')
     shape = list(line.shape)
-    shape[-1] = 4
+    shape[-1] = 3
     arr = np.zeros(shape)
     arr[:, 0] = line[:, 1]
     arr[:, 1] = line[:, 0]
-    arr[:, 2] = line[:, 2]
 
     gpkg_wkb = LineStringM(arr, srs_id=fc.spatial_reference_system.srs_id)
 
